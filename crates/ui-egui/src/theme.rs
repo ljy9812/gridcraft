@@ -652,6 +652,13 @@ pub fn pinned_font_definitions() -> FontDefinitions {
     font_definitions_impl(crate::i18n::Language::En, &[], false)
 }
 
+/// The web build's Hans face: the browser has no system fonts for `load_fallback` to find, so
+/// without an embedded face the zh interface and CJK cell text draw tofu. WenQuanYi Micro Hei,
+/// Apache-2.0 — craft-fonts' Hans face, the one the other Crafting Apps embed on wasm too. The
+/// desktop resolves its CJK from the system, so the bytes only compile into wasm.
+#[cfg(target_arch = "wasm32")]
+static WQY_MICROHEI: &[u8] = include_bytes!("../../../assets/fonts/wqy-microhei.ttf");
+
 /// [`font_definitions_for_language`] that also binds the workbook fonts in `used` that are
 /// installed, so cells set in them render with them; the rest fall back to the roles. The bound
 /// families are recorded in [`crate::fonts`] so [`cell_family`] only names a family egui has.
@@ -667,8 +674,16 @@ fn font_definitions_impl(language: crate::i18n::Language, used: &[String], syste
     let mut bound: Vec<String> = Vec::new();
     // The non-Latin fallback faces have to sit at the end of each chain: a Latin font owns Latin,
     // and epaint picks the first face that has the glyph, so they only catch their own scripts.
-    let fallback = if system { load_fallback(&mut fonts, HanOrder::of(language)) } else { Vec::new() };
+    #[cfg_attr(not(target_arch = "wasm32"), allow(unused_mut))]
+    let mut fallback = if system { load_fallback(&mut fonts, HanOrder::of(language)) } else { Vec::new() };
     let hack = fonts.font_data.contains_key(HACK).then_some(HACK);
+    // Web only: the embedded Hans face takes the (empty on wasm) system-fallback slot, so it
+    // reaches every role chain the way a system CJK face would (see `WQY_MICROHEI`).
+    #[cfg(target_arch = "wasm32")]
+    {
+        fonts.font_data.insert("wqy-microhei".into(), Arc::new(FontData::from_static(WQY_MICROHEI)));
+        fallback.push("wqy-microhei".into());
+    }
     for role in [UI, UI_BOLD, CELL, CELL_BOLD, CELL_ITALIC, CELL_BOLD_ITALIC, SERIF, MONO] {
         let chain = build_role_chain(&mut fonts, role, &base_prop, &base_mono, &fallback, hack, system);
         fonts.families.insert(FontFamily::Name(role.into()), chain);
